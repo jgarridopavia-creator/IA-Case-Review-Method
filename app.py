@@ -1,11 +1,12 @@
 """
 AI Case Review Method
-Aplicación Streamlit con tres agentes (Crítico / Optimista / Asertivo).
-GUI ÍNTEGRAMENTE EN CASTELLANO.
+Streamlit application with three agents (Critic / Optimist / Assertive).
+GUI fixed in English. Agents respond in the language chosen by the user.
 
-Ejecutar localmente:
+Run locally:
     streamlit run app.py
 """
+import os
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -24,7 +25,7 @@ from agents import (
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# Configuración de la página
+# Page configuration
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="AI Case Review Method",
@@ -34,7 +35,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Estado de sesión
+# Session state
 # ---------------------------------------------------------------------------
 DEFAULTS = {
     "fase": 1,
@@ -47,6 +48,7 @@ DEFAULTS = {
     "respuesta_optimista": "",
     "respuesta_final": "",
     "respuesta_asertivo": "",
+    "idioma_agentes": "English",
 }
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
@@ -57,68 +59,113 @@ def reset_app():
         st.session_state[k] = v
 
 
+# Search for the logo in the project folder (any common image extension)
+def _buscar_logo() -> str | None:
+    base = os.path.dirname(os.path.abspath(__file__))
+    for ext in ("png", "jpg", "jpeg", "PNG", "JPG", "JPEG"):
+        ruta = os.path.join(base, f"logosalle.{ext}")
+        if os.path.exists(ruta):
+            return ruta
+    return None
+
+
 # ---------------------------------------------------------------------------
-# Cabecera
+# Header (logo + title + reset)
 # ---------------------------------------------------------------------------
-col_t1, col_t2 = st.columns([5, 1])
-with col_t1:
+col_logo, col_title, col_reset = st.columns([1, 4, 1])
+
+with col_logo:
+    logo = _buscar_logo()
+    if logo:
+        st.image(logo, use_container_width=True)
+    else:
+        # Reserved placeholder until logosalle.(png|jpg) is uploaded
+        st.markdown(
+            "<div style='border:1px dashed #b5b5b5;border-radius:8px;"
+            "padding:24px 8px;text-align:center;color:#888;font-size:12px;'>"
+            "Upload <b>logosalle.png</b><br/>to project folder"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+with col_title:
     st.markdown("## AI Case Review Method")
     st.caption(
-        "Sube el caso práctico y los apuntes correspondientes del profesor. Plantea preguntas sobre el caso, introduce tus respuestas iniciales y recibe un feedback crítico y un feedback optimista."
-        "Una vez analizado todo, introduce tu respuesta final y obtén la "
-        "corrección definitiva."
+        "Upload the business case and the related professor's notes. "
+        "Ask questions about the case, write your initial answers and receive "
+        "critical and optimistic feedback. Once everything is analyzed, "
+        "submit your final answer and obtain the definitive correction."
     )
-with col_t2:
-    if st.button("🔄 Reiniciar", use_container_width=True):
+
+with col_reset:
+    if st.button("🔄 Reset", use_container_width=True):
         reset_app()
         st.rerun()
 
 st.divider()
 
+# ---------------------------------------------------------------------------
+# Language selector (only affects the agents' responses)
+# ---------------------------------------------------------------------------
+st.markdown("### 🌐 Agents response language")
+st.caption(
+    "Choose the language in which the three agents (Critic, Optimist, "
+    "Assertive) will write their answers. The interface will remain in English."
+)
+st.session_state.idioma_agentes = st.selectbox(
+    "Language",
+    options=["English", "Castellano", "Català"],
+    index=["English", "Castellano", "Català"].index(st.session_state.idioma_agentes),
+    key="sel_idioma",
+    label_visibility="collapsed",
+)
+
+st.divider()
+
 # ===========================================================================
-# FASE 1 — Entrada del alumno
+# PHASE 1 — Student input
 # ===========================================================================
 if st.session_state.fase >= 1:
-    st.markdown("### 1️⃣ Sube el caso práctico y los apuntes relacionados del profesor")
+    st.markdown("### 1️⃣ Upload the business case and related professor's notes")
 
     col1, col2 = st.columns(2)
     with col1:
         caso_pdf = st.file_uploader(
-            "📄 **Arrastra el caso práctico en PDF (obligatorio)** — admite varios archivos",
+            "📄 **Drag the business case PDF (mandatory)** — multiple files allowed",
             type=["pdf"],
             accept_multiple_files=True,
             key="upl_caso",
         )
     with col2:
         apuntes_pdf = st.file_uploader(
-            "📚 **Arrastra los apuntes del profesor en PDF (opcional)** — admite varios archivos",
+            "📚 **Drag the professor's notes PDF (optional)** — multiple files allowed",
             type=["pdf"],
             accept_multiple_files=True,
             key="upl_apuntes",
         )
 
-    st.markdown("### 2️⃣ Plantea una pregunta o cuestión sobre el caso")
+    st.markdown("### 2️⃣ Ask a question about the case")
     pregunta = st.text_area(
-        "Sin límite de palabras",
+        "No word limit",
         value=st.session_state.pregunta,
         height=110,
         key="in_pregunta",
-        placeholder="Ej.: ¿Cuál sería la mejor estrategia de internacionalización para esta empresa?",
+        placeholder="e.g. What would be the best internationalization strategy for this company?",
     )
 
-    st.markdown("### 3️⃣ Escribe tu respuesta inicial")
+    st.markdown("### 3️⃣ Write your initial answer")
     respuesta_ini = st.text_area(
-        "Sin límite de palabras",
+        "No word limit",
         value=st.session_state.respuesta_inicial,
         height=220,
         key="in_resp_ini",
-        placeholder="Desarrolla aquí tu respuesta con la máxima profundidad",
+        placeholder="Develop your answer here with the maximum depth",
     )
-    st.caption(f"Palabras: {contar_palabras(respuesta_ini)}")
+    st.caption(f"Words: {contar_palabras(respuesta_ini)}")
 
     st.markdown("")
     procesar = st.button(
-        "▶️ Procesar (lanzar feedback crítico y feedback optimista)",
+        "▶️ Process (run critical and optimistic feedback)",
         type="primary",
         use_container_width=True,
         disabled=(st.session_state.fase >= 2),
@@ -126,83 +173,87 @@ if st.session_state.fase >= 1:
 
     if procesar:
         if not caso_pdf:
-            st.error("Debes subir el caso práctico en PDF.")
+            st.error("You must upload the business case in PDF.")
             st.stop()
         if not pregunta.strip():
-            st.error("Debes escribir una pregunta.")
+            st.error("You must write a question.")
             st.stop()
         if not respuesta_ini.strip():
-            st.error("Debes escribir tu respuesta inicial.")
+            st.error("You must write your initial answer.")
             st.stop()
 
-        with st.spinner("Extrayendo texto del caso y los apuntes…"):
+        with st.spinner("Extracting text from the case and the notes…"):
             st.session_state.nombre_caso = ", ".join([f.name for f in caso_pdf])
             st.session_state.texto_caso = extraer_texto_pdfs(caso_pdf)
             st.session_state.texto_apuntes = extraer_texto_pdfs(apuntes_pdf or [])
             st.session_state.pregunta = pregunta
             st.session_state.respuesta_inicial = respuesta_ini
 
+        idioma = st.session_state.idioma_agentes
+
         try:
-            with st.spinner("🗡️ El Agente Crítico está analizando…"):
+            with st.spinner("🗡️ The Critical Agent is analyzing…"):
                 st.session_state.respuesta_critico = ejecutar_critico(
                     st.session_state.texto_caso,
                     st.session_state.texto_apuntes,
                     st.session_state.pregunta,
                     st.session_state.respuesta_inicial,
+                    idioma,
                 )
-            with st.spinner("🌟 El Agente Optimista está analizando…"):
+            with st.spinner("🌟 The Optimistic Agent is analyzing…"):
                 st.session_state.respuesta_optimista = ejecutar_optimista(
                     st.session_state.texto_caso,
                     st.session_state.texto_apuntes,
                     st.session_state.pregunta,
                     st.session_state.respuesta_inicial,
+                    idioma,
                 )
             st.session_state.fase = 2
             st.rerun()
         except Exception as e:
-            st.error(f"Error al llamar a los agentes: {e}")
+            st.error(f"Error calling the agents: {e}")
 
 # ===========================================================================
-# FASE 2 — Debate de los agentes
+# PHASE 2 — Debate
 # ===========================================================================
 if st.session_state.fase >= 2:
     st.divider()
-    st.markdown("### 4️⃣ Debate de los agentes")
+    st.markdown("### 4️⃣ Agents' debate")
 
     colA, colB = st.columns(2)
     with colA:
-        st.markdown("#### 🗡️ Agente Crítico")
+        st.markdown("#### 🗡️ Critical Agent")
         st.text_area(
-            "Feedback contrario a tu respuesta inicial:",
+            "Feedback against your initial answer:",
             value=st.session_state.respuesta_critico,
             height=420,
             key="out_critico",
         )
     with colB:
-        st.markdown("#### 🌟 Agente Optimista")
+        st.markdown("#### 🌟 Optimistic Agent")
         st.text_area(
-            "Feedback a favor de tu respuesta inicial:",
+            "Feedback in favor of your initial answer:",
             value=st.session_state.respuesta_optimista,
             height=420,
             key="out_optimista",
         )
 
-    st.markdown("### 5️⃣ Tu respuesta final")
+    st.markdown("### 5️⃣ Your final answer")
     respuesta_final = st.text_area(
-        "Después de analizar los feedbacks, escribe ahora tu respuesta definitiva (máx. 700 palabras):",
+        "After analyzing the feedback, write your definitive answer (max. 700 words):",
         value=st.session_state.respuesta_final,
         height=260,
         key="in_resp_final",
-        placeholder="Refina tu respuesta integrando los argumentos que consideres válidos",
+        placeholder="Refine your answer integrating the arguments you consider valid",
     )
     palabras_final = contar_palabras(respuesta_final)
     if palabras_final > 700:
-        st.warning(f"⚠️ Llevas {palabras_final} palabras. El límite son 700.")
+        st.warning(f"⚠️ You have written {palabras_final} words. Limit is 700.")
     else:
-        st.caption(f"Palabras: {palabras_final} / 700")
+        st.caption(f"Words: {palabras_final} / 700")
 
     procesar_final = st.button(
-        "▶️ Solicitar corrección del Agente Asertivo",
+        "▶️ Request the Assertive Agent's correction",
         type="primary",
         use_container_width=True,
         disabled=(st.session_state.fase >= 3),
@@ -210,42 +261,44 @@ if st.session_state.fase >= 2:
 
     if procesar_final:
         if not respuesta_final.strip():
-            st.error("Debes escribir tu respuesta final.")
+            st.error("You must write your final answer.")
             st.stop()
         if palabras_final > 700:
-            st.error("Tu respuesta final supera las 700 palabras. Recórtala antes de continuar.")
+            st.error("Your final answer exceeds 700 words. Trim it before continuing.")
             st.stop()
 
         st.session_state.respuesta_final = respuesta_final
+        idioma = st.session_state.idioma_agentes
 
         try:
-            with st.spinner("⚖️ El Agente Asertivo está corrigiendo…"):
+            with st.spinner("⚖️ The Assertive Agent is correcting…"):
                 st.session_state.respuesta_asertivo = ejecutar_asertivo(
                     st.session_state.texto_caso,
                     st.session_state.texto_apuntes,
                     st.session_state.pregunta,
                     st.session_state.respuesta_final,
+                    idioma,
                 )
             st.session_state.fase = 3
             st.rerun()
         except Exception as e:
-            st.error(f"Error al llamar al agente asertivo: {e}")
+            st.error(f"Error calling the assertive agent: {e}")
 
 # ===========================================================================
-# FASE 3 — Corrección final + exportación
+# PHASE 3 — Final correction + export
 # ===========================================================================
 if st.session_state.fase >= 3:
     st.divider()
-    st.markdown("### 6️⃣ Corrección del Agente Asertivo")
+    st.markdown("### 6️⃣ Assertive Agent's correction")
     st.text_area(
-        "Feedback, respuesta correcta de referencia y diferencias:",
+        "Feedback, reference correct answer and differences:",
         value=st.session_state.respuesta_asertivo,
         height=520,
         key="out_asertivo",
     )
 
     st.divider()
-    st.markdown("### 7️⃣ Exportar la sesión completa")
+    st.markdown("### 7️⃣ Export the full session")
 
     docx_buffer = construir_docx(
         nombre_caso=st.session_state.nombre_caso,
@@ -259,19 +312,19 @@ if st.session_state.fase >= 3:
 
     nombre_descarga = (
         st.session_state.nombre_caso.split(",")[0].replace(".pdf", "").strip()
-        if st.session_state.nombre_caso else "agora"
+        if st.session_state.nombre_caso else "case_review"
     )
     st.download_button(
-        label="📥 Descargar análisis en Word (.docx)",
+        label="📥 Download analysis as Word (.docx)",
         data=docx_buffer,
-        file_name=f"agora_{nombre_descarga}.docx",
+        file_name=f"case_review_{nombre_descarga}.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         type="primary",
         use_container_width=True,
     )
 
 # ---------------------------------------------------------------------------
-# Pie
+# Footer
 # ---------------------------------------------------------------------------
 st.divider()
 st.caption(

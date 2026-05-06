@@ -91,6 +91,10 @@ with col_logo:
 with col_title:
     st.markdown("## AI Case Review Method")
     st.caption(
+        "This is an AI-based pedagogical tool that applies the dialectical "
+        "method to train students’ critical thinking in the analysis of exercises and case studies. " 
+        "Three agents with opposing perspectives (critical, optimistic, and corrective) challenge students’ own "
+        "assumptions and require them to defend, refine, or reformulate their answers. "
         "Upload the business case and the related professor's notes. "
         "Ask questions about the case, write your initial answers and receive "
         "critical and optimistic feedback. Once everything is analyzed, "
@@ -250,7 +254,7 @@ if st.session_state.fase >= 2:
     if palabras_final > 500:
         st.warning(f"⚠️ You have written {palabras_final} words. Limit is 500.")
     else:
-        st.caption(f"Words: {palabras_final} / 500)
+        st.caption(f"Words: {palabras_final} / 500)"
 
     procesar_final = st.button(
         "▶️ Request the Assertive Agent's correction",
@@ -329,5 +333,4 @@ if st.session_state.fase >= 3:
 st.divider()
 st.caption(
     "AI Case Review Method · Prof. Dr. Jordi Garrido · La Salle Campus Barcelona-URL · "
-    "Powered by Claude (Anthropic)"
 )

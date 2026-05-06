@@ -254,7 +254,7 @@ if st.session_state.fase >= 2:
     if palabras_final > 500:
         st.warning(f"⚠️ You have written {palabras_final} words. Limit is 500.")
     else:
-        st.caption(f"Words: {palabras_final} / 500)"
+        st.caption(f"Words: {palabras_final} / 500")
 
     procesar_final = st.button(
         "▶️ Request the Assertive Agent's correction",

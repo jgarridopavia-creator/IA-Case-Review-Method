@@ -240,17 +240,17 @@ if st.session_state.fase >= 2:
 
     st.markdown("### 5️⃣ Your final answer")
     respuesta_final = st.text_area(
-        "After analyzing the feedback, write your definitive answer (max. 700 words):",
+        "After analyzing the feedback, write your definitive answer (max. 500 words):",
         value=st.session_state.respuesta_final,
         height=260,
         key="in_resp_final",
         placeholder="Refine your answer integrating the arguments you consider valid",
     )
     palabras_final = contar_palabras(respuesta_final)
-    if palabras_final > 700:
-        st.warning(f"⚠️ You have written {palabras_final} words. Limit is 700.")
+    if palabras_final > 500:
+        st.warning(f"⚠️ You have written {palabras_final} words. Limit is 500.")
     else:
-        st.caption(f"Words: {palabras_final} / 700")
+        st.caption(f"Words: {palabras_final} / 500)
 
     procesar_final = st.button(
         "▶️ Request the Assertive Agent's correction",
@@ -263,8 +263,8 @@ if st.session_state.fase >= 2:
         if not respuesta_final.strip():
             st.error("You must write your final answer.")
             st.stop()
-        if palabras_final > 700:
-            st.error("Your final answer exceeds 700 words. Trim it before continuing.")
+        if palabras_final > 500:
+            st.error("Your final answer exceeds 500 words. Trim it before continuing.")
             st.stop()
 
         st.session_state.respuesta_final = respuesta_final

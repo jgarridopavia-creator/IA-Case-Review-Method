@@ -90,7 +90,7 @@ STYLE GUIDELINES
 - Be critical but professional.
 - Do not be generic: literally cite which parts of the student's answer are wrong and why.
 - Structure your output with clear headings.
-- STRICT LIMIT: maximum 700 words.
+- STRICT LIMIT: maximum 500 words.
 
 {_instruccion_idioma(idioma)}
 """
@@ -119,7 +119,7 @@ STYLE GUIDELINES
 - Be optimistic but professional.
 - Do not be generic: literally cite which parts of the student's answer are good and why.
 - Structure your output with clear headings.
-- STRICT LIMIT: maximum 700 words.
+- STRICT LIMIT: maximum 500 words.
 
 {_instruccion_idioma(idioma)}
 """

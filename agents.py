@@ -1,10 +1,12 @@
 """
-Three-agent logic for AI Case Review Method + a gatekeeper Evaluator.
-Calls the Anthropic API (Claude) with specialized prompts.
-The output language is dynamic: it depends on what the student selects in the GUI.
+Four-agent logic for AI Case Review Method.
+- Evaluator (gatekeeper): scores the student's initial answer against 5 criteria.
+- Critic / Optimist / Assertive: same as before.
+
+The output language is dynamic: it depends on the GUI selector.
 """
-import json
 import os
+import json
 import re
 from anthropic import Anthropic
 
@@ -27,26 +29,24 @@ def _get_client() -> Anthropic:
 
 
 # ---------------------------------------------------------------------------
-# Language instruction (dynamic)
+# Language instruction
 # ---------------------------------------------------------------------------
 def _instruccion_idioma(idioma: str) -> str:
     mapa = {
         "English": (
-            "MANDATORY OUTPUT LANGUAGE: You MUST write your entire answer in ENGLISH, "
-            "regardless of the language of the case or the professor's notes. "
-            "All headings, connectors and arguments must be in English. Do NOT mix languages."
+            "MANDATORY OUTPUT LANGUAGE: Write your entire answer in ENGLISH, "
+            "regardless of the language of the case or the notes. All headings "
+            "and arguments must be in English. Do NOT mix languages."
         ),
         "Castellano": (
-            "IDIOMA DE SALIDA OBLIGATORIO: Debes responder ÍNTEGRAMENTE EN CASTELLANO "
-            "(español de España), incluso si el caso o los apuntes del profesor están "
-            "escritos en otro idioma. Todos los títulos, epígrafes, conectores y argumentos "
-            "deben estar en castellano. No mezcles idiomas."
+            "IDIOMA DE SALIDA OBLIGATORIO: Debes responder ÍNTEGRAMENTE EN CASTELLANO, "
+            "incluso si el caso o los apuntes están escritos en otro idioma. "
+            "Todos los títulos y argumentos deben estar en castellano."
         ),
         "Català": (
             "IDIOMA DE SORTIDA OBLIGATORI: Has de respondre ÍNTEGRAMENT EN CATALÀ, "
-            "encara que el cas pràctic o els apunts del professor estiguin escrits en "
-            "un altre idioma. Tots els títols, epígrafs, connectors i arguments han "
-            "de ser en català. No barregis idiomes."
+            "encara que el cas o els apunts estiguin escrits en un altre idioma. "
+            "Tots els títols i arguments han de ser en català."
         ),
     }
     return mapa.get(idioma, mapa["English"])
@@ -65,34 +65,39 @@ def _bloque_contexto(texto_caso: str, texto_apuntes: str) -> str:
 
 
 # ===========================================================================
-# AGENT 0 — EVALUATOR (gatekeeper)
+# AGENT 0: EVALUATOR (gatekeeper)
 # ===========================================================================
-# Returns a structured JSON: scores 0-2 on 5 criteria, plus a natural-language
-# message in the chosen language with which criteria failed.
 
-CRITERIOS = ["context", "evidencia", "kpis", "realismo", "horizonte_temporal"]
+CRITERIOS = [
+    ("contexto",  "Context",          "Relates the answer with market, competition, regulation, economic situation or trends."),
+    ("evidencia", "Evidence",         "Uses data, facts or fragments from the case and/or the notes to justify."),
+    ("kpis",      "KPIs",             "Includes success indicators (sales, margin, satisfaction, market share, retention, efficiency, etc.)."),
+    ("realismo",  "Realism",          "The recommendation is realistic with the company's resources, time, capabilities and constraints."),
+    ("horizonte", "Time horizon",     "Differentiates short, mid and long-term impacts of the proposed decision."),
+]
 
-CRITERIOS_LABEL = {
+# Localized labels for the table shown to the student
+ETIQUETAS_CRITERIOS = {
     "English": {
-        "context": "Context (market, competition, regulation, trends)",
-        "evidencia": "Evidence (data, facts or fragments from the case/notes)",
-        "kpis": "KPIs (sales, margin, market share, retention, efficiency…)",
-        "realismo": "Realism (resources, time, capabilities, constraints)",
-        "horizonte_temporal": "Time horizon (short / medium / long term)",
+        "contexto":  "Context (market, competition, regulation, trends)",
+        "evidencia": "Evidence (data, facts, fragments from case/notes)",
+        "kpis":      "KPIs (sales, margin, satisfaction, market share...)",
+        "realismo":  "Realism (resources, time, capabilities, constraints)",
+        "horizonte": "Time horizon (short/mid/long-term impacts)",
     },
     "Castellano": {
-        "context": "Contexto (mercado, competencia, regulación, tendencias)",
-        "evidencia": "Evidencia (datos, hechos o fragmentos del caso/apuntes)",
-        "kpis": "KPIs (ventas, margen, cuota, retención, eficiencia…)",
-        "realismo": "Realismo (recursos, tiempo, capacidades, restricciones)",
-        "horizonte_temporal": "Horizonte temporal (corto / medio / largo plazo)",
+        "contexto":  "Contexto (mercado, competencia, regulación, tendencias)",
+        "evidencia": "Evidencia (datos, hechos, fragmentos del caso/apuntes)",
+        "kpis":      "KPIs (ventas, margen, satisfacción, cuota...)",
+        "realismo":  "Realismo (recursos, tiempo, capacidades, restricciones)",
+        "horizonte": "Horizonte temporal (impactos a corto/medio/largo plazo)",
     },
     "Català": {
-        "context": "Context (mercat, competència, regulació, tendències)",
-        "evidencia": "Evidència (dades, fets o fragments del cas/apunts)",
-        "kpis": "KPIs (vendes, marge, quota, retenció, eficiència…)",
-        "realismo": "Realisme (recursos, temps, capacitats, restriccions)",
-        "horizonte_temporal": "Horitzó temporal (curt / mitjà / llarg termini)",
+        "contexto":  "Context (mercat, competència, regulació, tendències)",
+        "evidencia": "Evidència (dades, fets, fragments del cas/apunts)",
+        "kpis":      "KPIs (vendes, marge, satisfacció, quota...)",
+        "realismo":  "Realisme (recursos, temps, capacitats, restriccions)",
+        "horizonte": "Horitzó temporal (impactes a curt/mitjà/llarg termini)",
     },
 }
 
@@ -107,58 +112,104 @@ STUDENT DATA
 
 ROLE INSTRUCTIONS
 =================
-You are a strict pedagogical gatekeeper. Your only job is to decide whether the student's INITIAL answer meets the MINIMUM requirements to be evaluable. You do NOT correct the answer; you only check whether it has enough substance to be analyzed by the next agents.
+You are a strict but fair MBA case-method evaluator. Your ONLY mission is to decide whether the student's initial answer meets the minimum quality required to deserve full critical/optimistic feedback.
 
-Score each of these 5 criteria with EXACTLY one integer: 0, 1 or 2.
-- 0 = absent (the criterion is not present at all)
-- 1 = partial (the criterion is touched on but superficially or incompletely)
-- 2 = present (the criterion is clearly and substantively addressed)
+Score the answer on 5 criteria. For each criterion, give an integer score:
+  - 0 = absent (the answer does NOT address this criterion)
+  - 1 = partial (the answer addresses it superficially or incompletely)
+  - 2 = present (the answer addresses it clearly and substantively)
 
-CRITERIA
-========
-1. context: The answer relates to the business environment (market, competition, economic situation, regulation or trends).
-2. evidencia: The answer uses data, facts, figures or fragments from the case and/or the professor's notes to justify the recommendation.
-3. kpis: The answer includes success indicators (sales, margin, customer satisfaction, market share, retention, efficiency, etc.).
-4. realismo: The recommendation is realistic regarding the firm's resources, time, capabilities and constraints.
-5. horizonte_temporal: The answer differentiates short-, medium- and long-term impacts of the proposed decision.
+The 5 criteria are:
+1. CONTEXT — Relates the answer with the case's environment: market, competition, economic situation, regulation, or trends.
+2. EVIDENCE — Uses data, facts or fragments from the case and/or the professor's notes to justify the recommendation.
+3. KPIs — Includes success indicators (sales, margin, customer satisfaction, market share, retention, efficiency, etc.).
+4. REALISM — The recommendation is realistic given the company's resources, time, capabilities and constraints described in the case.
+5. TIME HORIZON — Differentiates short-term, mid-term and long-term impacts of the proposed decision.
 
-ANTI-CHEATING RULES
-===================
-- If the answer is empty, gibberish, off-topic, or just a copy/paste of the case, score everything 0.
-- If the answer is extremely vague ("I think it's a good idea") with no specifics, max 1 in any criterion.
-- The criteria are independent: an answer can score high in one and 0 in another.
+ANTI-CHEAT RULES
+================
+- If the answer is empty, nonsensical, or only a few words: 0 in all criteria.
+- If the answer copies the case practically verbatim without adding analysis: max 1 in EVIDENCE, 0 in the rest.
+- If the answer is a generic management essay unrelated to the specific case: 0 in CONTEXT and EVIDENCE.
 
-OUTPUT FORMAT — STRICT JSON
-===========================
-You MUST return ONLY a valid JSON object, with NO surrounding text, NO markdown fences, NO explanation outside the JSON. The JSON must follow EXACTLY this schema:
+OUTPUT FORMAT (STRICT JSON, NOTHING ELSE)
+=========================================
+Return ONLY a JSON object with this exact structure (no markdown, no code fences, no explanations outside the JSON):
 
 {{
   "scores": {{
-    "context": 0,
-    "evidencia": 0,
-    "kpis": 0,
-    "realismo": 0,
-    "horizonte_temporal": 0
+    "contexto":  <0|1|2>,
+    "evidencia": <0|1|2>,
+    "kpis":      <0|1|2>,
+    "realismo":  <0|1|2>,
+    "horizonte": <0|1|2>
   }},
-  "total": 0,
-  "passed": false,
-  "failed_criteria": ["context", "kpis"],
-  "message": "<natural-language message addressed to the student, in the language indicated below>"
+  "total": <integer 0-10>,
+  "passes": <true|false>,
+  "feedback_per_criterion": {{
+    "contexto":  "<one short sentence explaining why this score>",
+    "evidencia": "<one short sentence explaining why this score>",
+    "kpis":      "<one short sentence explaining why this score>",
+    "realismo":  "<one short sentence explaining why this score>",
+    "horizonte": "<one short sentence explaining why this score>"
+  }},
+  "global_message": "<2-3 sentences: if passes=false, tell the student what to add/improve to reach >=6/10. If passes=true, briefly highlight the strongest criterion>"
 }}
 
-Where:
-- "total" = sum of the 5 scores (0-10).
-- "passed" = true if total >= 6, else false.
-- "failed_criteria" = array with the keys of every criterion that scored 0 or 1 (only fill it when "passed" is false; when "passed" is true, return an empty array []).
-- "message" = a short, encouraging but firm message (3-6 lines) in the chosen language, telling the student what is missing or weak. If passed=true, write a short congratulatory message and announce the next step. Do NOT reveal the numeric scores in this message.
+The "passes" field MUST be true if total >= 6, false otherwise.
+The "total" MUST equal the sum of the 5 scores.
 
-{_instruccion_idioma(idioma)}
+The strings inside "feedback_per_criterion" and "global_message" MUST be written in this language: {idioma}.
+The JSON keys (contexto, evidencia, etc.) and structure MUST stay as-is in English.
 """
 
 
-# ---------------------------------------------------------------------------
-# Prompts of the 3 main agents
-# ---------------------------------------------------------------------------
+def _extraer_json(texto: str) -> dict:
+    """Extracts the first JSON object found in the model's response.
+    Tolerates accidental code fences or extra text."""
+    # Try direct parse first
+    try:
+        return json.loads(texto)
+    except Exception:
+        pass
+    # Strip code fences if present
+    limpio = re.sub(r"```(?:json)?", "", texto).strip("` \n")
+    try:
+        return json.loads(limpio)
+    except Exception:
+        pass
+    # Last resort: extract the first {...} block
+    match = re.search(r"\{.*\}", texto, re.DOTALL)
+    if match:
+        return json.loads(match.group(0))
+    raise ValueError("No se ha podido extraer JSON de la respuesta del evaluador.")
+
+
+def ejecutar_avaluador(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma="English") -> dict:
+    """Returns a dict with the evaluation result.
+    Keys: scores, total, passes, feedback_per_criterion, global_message."""
+    client = _get_client()
+    prompt = prompt_avaluador(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma)
+    msg = client.messages.create(
+        model=MODELO,
+        max_tokens=1500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    partes = [b.text for b in msg.content if getattr(b, "type", None) == "text"]
+    texto = "\n".join(partes).strip()
+    data = _extraer_json(texto)
+
+    # Defensive normalization
+    scores = data.get("scores", {})
+    total = sum(int(scores.get(k, 0)) for k, _, _ in CRITERIOS)
+    data["total"] = total
+    data["passes"] = total >= 6
+    return data
+
+
+# ===========================================================================
+# AGENT 1: CRITIC
+# ===========================================================================
 
 def prompt_critico(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma) -> str:
     return f"""{_bloque_contexto(texto_caso, texto_apuntes)}
@@ -189,6 +240,14 @@ STYLE GUIDELINES
 """
 
 
+def ejecutar_critico(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma="English") -> str:
+    return _llamar(prompt_critico(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma))
+
+
+# ===========================================================================
+# AGENT 2: OPTIMIST
+# ===========================================================================
+
 def prompt_optimista(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma) -> str:
     return f"""{_bloque_contexto(texto_caso, texto_apuntes)}
 
@@ -217,6 +276,14 @@ STYLE GUIDELINES
 {_instruccion_idioma(idioma)}
 """
 
+
+def ejecutar_optimista(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma="English") -> str:
+    return _llamar(prompt_optimista(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma))
+
+
+# ===========================================================================
+# AGENT 3: ASSERTIVE
+# ===========================================================================
 
 def prompt_asertivo(texto_caso, texto_apuntes, pregunta, respuesta_final, idioma) -> str:
     return f"""{_bloque_contexto(texto_caso, texto_apuntes)}
@@ -261,9 +328,16 @@ STYLE GUIDELINES
 """
 
 
-# ---------------------------------------------------------------------------
-# Model calls
-# ---------------------------------------------------------------------------
+def ejecutar_asertivo(texto_caso, texto_apuntes, pregunta, respuesta_final, idioma="English") -> str:
+    return _llamar(
+        prompt_asertivo(texto_caso, texto_apuntes, pregunta, respuesta_final, idioma),
+        max_tokens=3500,
+    )
+
+
+# ===========================================================================
+# Shared call helper
+# ===========================================================================
 
 def _llamar(prompt: str, max_tokens: int = 2500) -> str:
     client = _get_client()
@@ -274,69 +348,3 @@ def _llamar(prompt: str, max_tokens: int = 2500) -> str:
     )
     partes = [b.text for b in msg.content if getattr(b, "type", None) == "text"]
     return "\n".join(partes).strip()
-
-
-def _extraer_json(raw: str) -> dict:
-    """Robust JSON extraction. Accepts JSON with or without ```json fences."""
-    raw = raw.strip()
-    # Strip code fences if present
-    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw = re.sub(r"\s*```$", "", raw)
-    # Try direct parse
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
-    # Fallback: extract the largest {...} block
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if match:
-        return json.loads(match.group(0))
-    raise ValueError("Could not parse evaluator JSON response.")
-
-
-def ejecutar_avaluador(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma="English") -> dict:
-    """Runs the gatekeeper agent. Returns a dict with keys:
-       scores (dict), total (int), passed (bool), failed_criteria (list[str]), message (str)."""
-    raw = _llamar(
-        prompt_avaluador(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma),
-        max_tokens=900,
-    )
-    data = _extraer_json(raw)
-
-    # Sanity defaults if the model omits something
-    scores = data.get("scores", {})
-    safe_scores = {c: int(scores.get(c, 0)) for c in CRITERIOS}
-    total = data.get("total")
-    if not isinstance(total, int):
-        total = sum(safe_scores.values())
-    passed = bool(data.get("passed", total >= 6))
-    failed_criteria = data.get("failed_criteria", [])
-    if not isinstance(failed_criteria, list):
-        failed_criteria = []
-    # If passed, force empty failed_criteria
-    if passed:
-        failed_criteria = []
-    message = str(data.get("message", "")).strip()
-
-    return {
-        "scores": safe_scores,
-        "total": total,
-        "passed": passed,
-        "failed_criteria": failed_criteria,
-        "message": message,
-    }
-
-
-def ejecutar_critico(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma="English") -> str:
-    return _llamar(prompt_critico(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma))
-
-
-def ejecutar_optimista(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma="English") -> str:
-    return _llamar(prompt_optimista(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma))
-
-
-def ejecutar_asertivo(texto_caso, texto_apuntes, pregunta, respuesta_final, idioma="English") -> str:
-    return _llamar(
-        prompt_asertivo(texto_caso, texto_apuntes, pregunta, respuesta_final, idioma),
-        max_tokens=3500,
-    )

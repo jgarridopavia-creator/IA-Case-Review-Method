@@ -1,8 +1,12 @@
 """
 AI Case Review Method
-Streamlit application with a gatekeeper Evaluator + three agents
-(Critic / Optimist / Assertive). GUI fixed in English.
-Agents respond in the language chosen by the user.
+Streamlit application with four agents:
+  0. Evaluator (gatekeeper): scores the initial answer 0-10. Threshold = 6/10.
+  1. Critic
+  2. Optimist
+  3. Assertive
+
+GUI fixed in English. Agents respond in the language chosen by the user.
 
 Run locally:
     streamlit run app.py
@@ -22,7 +26,8 @@ from agents import (
     ejecutar_critico,
     ejecutar_optimista,
     ejecutar_asertivo,
-    CRITERIOS_LABEL,
+    ETIQUETAS_CRITERIOS,
+    CRITERIOS,
 )
 
 load_dotenv()
@@ -47,14 +52,13 @@ DEFAULTS = {
     "nombre_caso": "",
     "pregunta": "",
     "respuesta_inicial": "",
+    "evaluacion": None,            # dict returned by ejecutar_avaluador
+    "intentos_evaluador": 0,
     "respuesta_critico": "",
     "respuesta_optimista": "",
     "respuesta_final": "",
     "respuesta_asertivo": "",
     "idioma_agentes": "English",
-    # Gatekeeper
-    "evaluacion": None,        # dict last evaluation result, or None
-    "intentos": 0,             # number of evaluator attempts so far
 }
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
@@ -65,7 +69,6 @@ def reset_app():
         st.session_state[k] = v
 
 
-# Search for the logo in the project folder (any common image extension)
 def _buscar_logo() -> str | None:
     base = os.path.dirname(os.path.abspath(__file__))
     for ext in ("png", "jpg", "jpeg", "PNG", "JPG", "JPEG"):
@@ -73,32 +76,6 @@ def _buscar_logo() -> str | None:
         if os.path.exists(ruta):
             return ruta
     return None
-
-
-# Localized labels for the gatekeeper UI block
-EVAL_BLOCK_LABELS = {
-    "English": {
-        "title": "📋 Evaluability check",
-        "fail_header": "Your initial answer does not yet meet the minimum requirements to be evaluated.",
-        "missing": "Criteria you need to strengthen:",
-        "retry": "Edit your initial answer above and click **Process** again.",
-        "attempts": "Attempts so far",
-    },
-    "Castellano": {
-        "title": "📋 Verificación de evaluabilidad",
-        "fail_header": "Tu respuesta inicial aún no cumple los requisitos mínimos para ser evaluada.",
-        "missing": "Criterios que debes reforzar:",
-        "retry": "Edita tu respuesta inicial arriba y vuelve a pulsar **Process**.",
-        "attempts": "Intentos realizados",
-    },
-    "Català": {
-        "title": "📋 Verificació d'avaluabilitat",
-        "fail_header": "La teva resposta inicial encara no compleix els requisits mínims per ser avaluada.",
-        "missing": "Criteris que has de reforçar:",
-        "retry": "Edita la teva resposta inicial a dalt i torna a prémer **Process**.",
-        "attempts": "Intents realitzats",
-    },
-}
 
 
 # ---------------------------------------------------------------------------
@@ -122,10 +99,10 @@ with col_logo:
 with col_title:
     st.markdown("## AI Case Review Method")
     st.caption(
-        "Upload the business case and the related professor's notes. "
-        "Ask questions about the case, write your initial answers and receive "
-        "critical and optimistic feedback. Once everything is analyzed, "
-        "submit your final answer and obtain the definitive correction."
+        "Tool that strengthens the student's critical thinking when working "
+        "on business cases. Three AI consultants debate with the student: one "
+        "challenges the answer, another defends it, and a third corrects it "
+        "with the reference solution."
     )
 
 with col_reset:
@@ -184,22 +161,22 @@ if st.session_state.fase >= 1:
         placeholder="e.g. What would be the best internationalization strategy for this company?",
     )
 
-    st.markdown("### 3️⃣ Write your initial answer (no AI help)")
+    st.markdown("### 3️⃣ Write your initial answer")
     respuesta_ini = st.text_area(
         "No word limit",
         value=st.session_state.respuesta_inicial,
-        height=240,
+        height=220,
         key="in_resp_ini",
-        placeholder="Develop your answer here with the maximum depth. Your answer will first be checked for evaluability before going through the critical and optimistic feedback.",
+        placeholder="Develop your answer here with the maximum depth",
     )
     st.caption(f"Words: {contar_palabras(respuesta_ini)}")
 
     st.markdown("")
     procesar = st.button(
-        "▶️ Process (check evaluability and run the feedback)",
+        "▶️ Evaluate my initial answer",
         type="primary",
         use_container_width=True,
-        disabled=(st.session_state.fase >= 2),
+        disabled=(st.session_state.fase >= 3),
     )
 
     if procesar:
@@ -222,11 +199,8 @@ if st.session_state.fase >= 1:
 
         idioma = st.session_state.idioma_agentes
 
-        # -------------------------------------------------------
-        # Step 1 — Gatekeeper evaluator
-        # -------------------------------------------------------
         try:
-            with st.spinner("📋 Checking whether your answer meets the minimum requirements…"):
+            with st.spinner("📊 The Evaluator is checking minimum quality…"):
                 evaluacion = ejecutar_avaluador(
                     st.session_state.texto_caso,
                     st.session_state.texto_apuntes,
@@ -235,72 +209,89 @@ if st.session_state.fase >= 1:
                     idioma,
                 )
             st.session_state.evaluacion = evaluacion
-            st.session_state.intentos += 1
-        except Exception as e:
-            st.error(f"Error calling the evaluator: {e}")
-            st.stop()
+            st.session_state.intentos_evaluador += 1
 
-        # -------------------------------------------------------
-        # Step 2 — If passed, run Critic + Optimist; else, stop
-        # -------------------------------------------------------
-        if not evaluacion["passed"]:
-            # Stay in phase 1; the failure block will be rendered below.
-            st.rerun()
-        else:
-            try:
-                with st.spinner("🗡️ The Critical Agent is analyzing…"):
-                    st.session_state.respuesta_critico = ejecutar_critico(
-                        st.session_state.texto_caso,
-                        st.session_state.texto_apuntes,
-                        st.session_state.pregunta,
-                        st.session_state.respuesta_inicial,
-                        idioma,
-                    )
-                with st.spinner("🌟 The Optimistic Agent is analyzing…"):
-                    st.session_state.respuesta_optimista = ejecutar_optimista(
-                        st.session_state.texto_caso,
-                        st.session_state.texto_apuntes,
-                        st.session_state.pregunta,
-                        st.session_state.respuesta_inicial,
-                        idioma,
-                    )
+            if evaluacion.get("passes"):
                 st.session_state.fase = 2
                 st.rerun()
-            except Exception as e:
-                st.error(f"Error calling the agents: {e}")
+            else:
+                st.session_state.fase = 1  # stay in phase 1
+                st.rerun()
+        except Exception as e:
+            st.error(f"Error calling the evaluator: {e}")
 
-    # ---- Render the failure block if the last evaluation did not pass ----
-    if (
-        st.session_state.fase == 1
-        and st.session_state.evaluacion is not None
-        and not st.session_state.evaluacion["passed"]
-    ):
-        idioma = st.session_state.idioma_agentes
-        labels = EVAL_BLOCK_LABELS.get(idioma, EVAL_BLOCK_LABELS["English"])
-        crit_labels = CRITERIOS_LABEL.get(idioma, CRITERIOS_LABEL["English"])
-        ev = st.session_state.evaluacion
+# ---------------------------------------------------------------------------
+# Show evaluator result (if any)
+# ---------------------------------------------------------------------------
+if st.session_state.evaluacion is not None:
+    ev = st.session_state.evaluacion
+    total = ev.get("total", 0)
+    passes = ev.get("passes", False)
+    scores = ev.get("scores", {})
+    feedback = ev.get("feedback_per_criterion", {})
+    mensaje_global = ev.get("global_message", "")
 
-        st.markdown("---")
-        st.markdown(f"### {labels['title']}")
-        st.error(f"**{labels['fail_header']}**")
+    idioma = st.session_state.idioma_agentes
+    etiquetas = ETIQUETAS_CRITERIOS.get(idioma, ETIQUETAS_CRITERIOS["English"])
 
-        if ev.get("message"):
-            st.markdown(ev["message"])
+    st.divider()
+    if passes:
+        st.success(
+            f"✅ **Evaluator score: {total}/10** — Your answer meets the minimum quality "
+            f"to proceed (attempt #{st.session_state.intentos_evaluador})."
+        )
+    else:
+        st.error(
+            f"❌ **Evaluator score: {total}/10** — Your answer is not yet evaluable "
+            f"(attempt #{st.session_state.intentos_evaluador}). "
+            f"You need at least 6/10 to receive critical and optimistic feedback. "
+            f"Review the table below, rewrite your answer above and click "
+            f"**Evaluate my initial answer** again."
+        )
 
-        failed = ev.get("failed_criteria") or []
-        if failed:
-            st.markdown(f"**{labels['missing']}**")
-            for key in failed:
-                texto = crit_labels.get(key, key)
-                st.markdown(f"- {texto}")
+    with st.expander("📋 Detailed evaluation by criterion", expanded=not passes):
+        # Build a small markdown table
+        filas = []
+        filas.append("| Criterion | Score | Comment |")
+        filas.append("|---|---|---|")
+        for clave, _, _ in CRITERIOS:
+            puntos = int(scores.get(clave, 0))
+            etiqueta = etiquetas.get(clave, clave)
+            comentari = feedback.get(clave, "—").replace("|", "/")
+            filas.append(f"| {etiqueta} | **{puntos}/2** | {comentari} |")
+        st.markdown("\n".join(filas))
 
-        st.info(labels["retry"])
-        st.caption(f"{labels['attempts']}: {st.session_state.intentos}")
+        if mensaje_global:
+            st.markdown(f"**Overall message from the Evaluator:** {mensaje_global}")
 
 # ===========================================================================
-# PHASE 2 — Debate
+# PHASE 2 — Debate (Critic + Optimist)
 # ===========================================================================
-if st.session_state.fase >= 2:
+if st.session_state.fase == 2 and not st.session_state.respuesta_critico:
+    # Trigger the two agents now
+    idioma = st.session_state.idioma_agentes
+    try:
+        with st.spinner("🗡️ The Critical Agent is analyzing…"):
+            st.session_state.respuesta_critico = ejecutar_critico(
+                st.session_state.texto_caso,
+                st.session_state.texto_apuntes,
+                st.session_state.pregunta,
+                st.session_state.respuesta_inicial,
+                idioma,
+            )
+        with st.spinner("🌟 The Optimistic Agent is analyzing…"):
+            st.session_state.respuesta_optimista = ejecutar_optimista(
+                st.session_state.texto_caso,
+                st.session_state.texto_apuntes,
+                st.session_state.pregunta,
+                st.session_state.respuesta_inicial,
+                idioma,
+            )
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error calling the agents: {e}")
+
+if st.session_state.fase >= 2 and st.session_state.respuesta_critico:
     st.divider()
     st.markdown("### 4️⃣ Agents' debate")
 

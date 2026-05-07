@@ -1,7 +1,8 @@
 """
 AI Case Review Method
-Streamlit application with three agents (Critic / Optimist / Assertive).
-GUI fixed in English. Agents respond in the language chosen by the user.
+Streamlit application with a gatekeeper Evaluator + three agents
+(Critic / Optimist / Assertive). GUI fixed in English.
+Agents respond in the language chosen by the user.
 
 Run locally:
     streamlit run app.py
@@ -17,9 +18,11 @@ from utils import (
     construir_docx,
 )
 from agents import (
+    ejecutar_avaluador,
     ejecutar_critico,
     ejecutar_optimista,
     ejecutar_asertivo,
+    CRITERIOS_LABEL,
 )
 
 load_dotenv()
@@ -49,6 +52,9 @@ DEFAULTS = {
     "respuesta_final": "",
     "respuesta_asertivo": "",
     "idioma_agentes": "English",
+    # Gatekeeper
+    "evaluacion": None,        # dict last evaluation result, or None
+    "intentos": 0,             # number of evaluator attempts so far
 }
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
@@ -69,6 +75,32 @@ def _buscar_logo() -> str | None:
     return None
 
 
+# Localized labels for the gatekeeper UI block
+EVAL_BLOCK_LABELS = {
+    "English": {
+        "title": "📋 Evaluability check",
+        "fail_header": "Your initial answer does not yet meet the minimum requirements to be evaluated.",
+        "missing": "Criteria you need to strengthen:",
+        "retry": "Edit your initial answer above and click **Process** again.",
+        "attempts": "Attempts so far",
+    },
+    "Castellano": {
+        "title": "📋 Verificación de evaluabilidad",
+        "fail_header": "Tu respuesta inicial aún no cumple los requisitos mínimos para ser evaluada.",
+        "missing": "Criterios que debes reforzar:",
+        "retry": "Edita tu respuesta inicial arriba y vuelve a pulsar **Process**.",
+        "attempts": "Intentos realizados",
+    },
+    "Català": {
+        "title": "📋 Verificació d'avaluabilitat",
+        "fail_header": "La teva resposta inicial encara no compleix els requisits mínims per ser avaluada.",
+        "missing": "Criteris que has de reforçar:",
+        "retry": "Edita la teva resposta inicial a dalt i torna a prémer **Process**.",
+        "attempts": "Intents realitzats",
+    },
+}
+
+
 # ---------------------------------------------------------------------------
 # Header (logo + title + reset)
 # ---------------------------------------------------------------------------
@@ -79,7 +111,6 @@ with col_logo:
     if logo:
         st.image(logo, use_container_width=True)
     else:
-        # Reserved placeholder until logosalle.(png|jpg) is uploaded
         st.markdown(
             "<div style='border:1px dashed #b5b5b5;border-radius:8px;"
             "padding:24px 8px;text-align:center;color:#888;font-size:12px;'>"
@@ -91,10 +122,6 @@ with col_logo:
 with col_title:
     st.markdown("## AI Case Review Method")
     st.caption(
-        "This is an AI-based pedagogical tool that applies the dialectical "
-        "method to train students’ critical thinking in the analysis of exercises and case studies. " 
-        "Three agents with opposing perspectives (critical, optimistic, and corrective) challenge students’ own "
-        "assumptions and require them to defend, refine, or reformulate their answers. "
         "Upload the business case and the related professor's notes. "
         "Ask questions about the case, write your initial answers and receive "
         "critical and optimistic feedback. Once everything is analyzed, "
@@ -113,8 +140,8 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.markdown("### 🌐 Agents response language")
 st.caption(
-    "Choose the language in which the three agents (Critic, Optimist, "
-    "Assertive) will write their answers. The interface will remain in English."
+    "Choose the language in which the agents will write their answers. "
+    "The interface will remain in English."
 )
 st.session_state.idioma_agentes = st.selectbox(
     "Language",
@@ -127,7 +154,7 @@ st.session_state.idioma_agentes = st.selectbox(
 st.divider()
 
 # ===========================================================================
-# PHASE 1 — Student input
+# PHASE 1 — Student input + Evaluator gatekeeper
 # ===========================================================================
 if st.session_state.fase >= 1:
     st.markdown("### 1️⃣ Upload the business case and related professor's notes")
@@ -157,19 +184,19 @@ if st.session_state.fase >= 1:
         placeholder="e.g. What would be the best internationalization strategy for this company?",
     )
 
-    st.markdown("### 3️⃣ Write your initial answer")
+    st.markdown("### 3️⃣ Write your initial answer (no AI help)")
     respuesta_ini = st.text_area(
         "No word limit",
         value=st.session_state.respuesta_inicial,
-        height=220,
+        height=240,
         key="in_resp_ini",
-        placeholder="Develop your answer here with the maximum depth",
+        placeholder="Develop your answer here with the maximum depth. Your answer will first be checked for evaluability before going through the critical and optimistic feedback.",
     )
     st.caption(f"Words: {contar_palabras(respuesta_ini)}")
 
     st.markdown("")
     procesar = st.button(
-        "▶️ Process (run critical and optimistic feedback)",
+        "▶️ Process (check evaluability and run the feedback)",
         type="primary",
         use_container_width=True,
         disabled=(st.session_state.fase >= 2),
@@ -195,27 +222,80 @@ if st.session_state.fase >= 1:
 
         idioma = st.session_state.idioma_agentes
 
+        # -------------------------------------------------------
+        # Step 1 — Gatekeeper evaluator
+        # -------------------------------------------------------
         try:
-            with st.spinner("🗡️ The Critical Agent is analyzing…"):
-                st.session_state.respuesta_critico = ejecutar_critico(
+            with st.spinner("📋 Checking whether your answer meets the minimum requirements…"):
+                evaluacion = ejecutar_avaluador(
                     st.session_state.texto_caso,
                     st.session_state.texto_apuntes,
                     st.session_state.pregunta,
                     st.session_state.respuesta_inicial,
                     idioma,
                 )
-            with st.spinner("🌟 The Optimistic Agent is analyzing…"):
-                st.session_state.respuesta_optimista = ejecutar_optimista(
-                    st.session_state.texto_caso,
-                    st.session_state.texto_apuntes,
-                    st.session_state.pregunta,
-                    st.session_state.respuesta_inicial,
-                    idioma,
-                )
-            st.session_state.fase = 2
-            st.rerun()
+            st.session_state.evaluacion = evaluacion
+            st.session_state.intentos += 1
         except Exception as e:
-            st.error(f"Error calling the agents: {e}")
+            st.error(f"Error calling the evaluator: {e}")
+            st.stop()
+
+        # -------------------------------------------------------
+        # Step 2 — If passed, run Critic + Optimist; else, stop
+        # -------------------------------------------------------
+        if not evaluacion["passed"]:
+            # Stay in phase 1; the failure block will be rendered below.
+            st.rerun()
+        else:
+            try:
+                with st.spinner("🗡️ The Critical Agent is analyzing…"):
+                    st.session_state.respuesta_critico = ejecutar_critico(
+                        st.session_state.texto_caso,
+                        st.session_state.texto_apuntes,
+                        st.session_state.pregunta,
+                        st.session_state.respuesta_inicial,
+                        idioma,
+                    )
+                with st.spinner("🌟 The Optimistic Agent is analyzing…"):
+                    st.session_state.respuesta_optimista = ejecutar_optimista(
+                        st.session_state.texto_caso,
+                        st.session_state.texto_apuntes,
+                        st.session_state.pregunta,
+                        st.session_state.respuesta_inicial,
+                        idioma,
+                    )
+                st.session_state.fase = 2
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error calling the agents: {e}")
+
+    # ---- Render the failure block if the last evaluation did not pass ----
+    if (
+        st.session_state.fase == 1
+        and st.session_state.evaluacion is not None
+        and not st.session_state.evaluacion["passed"]
+    ):
+        idioma = st.session_state.idioma_agentes
+        labels = EVAL_BLOCK_LABELS.get(idioma, EVAL_BLOCK_LABELS["English"])
+        crit_labels = CRITERIOS_LABEL.get(idioma, CRITERIOS_LABEL["English"])
+        ev = st.session_state.evaluacion
+
+        st.markdown("---")
+        st.markdown(f"### {labels['title']}")
+        st.error(f"**{labels['fail_header']}**")
+
+        if ev.get("message"):
+            st.markdown(ev["message"])
+
+        failed = ev.get("failed_criteria") or []
+        if failed:
+            st.markdown(f"**{labels['missing']}**")
+            for key in failed:
+                texto = crit_labels.get(key, key)
+                st.markdown(f"- {texto}")
+
+        st.info(labels["retry"])
+        st.caption(f"{labels['attempts']}: {st.session_state.intentos}")
 
 # ===========================================================================
 # PHASE 2 — Debate
@@ -244,17 +324,17 @@ if st.session_state.fase >= 2:
 
     st.markdown("### 5️⃣ Your final answer")
     respuesta_final = st.text_area(
-        "After analyzing the feedback, write your definitive answer (max. 500 words):",
+        "After analyzing the feedback, write your definitive answer (max. 700 words):",
         value=st.session_state.respuesta_final,
         height=260,
         key="in_resp_final",
         placeholder="Refine your answer integrating the arguments you consider valid",
     )
     palabras_final = contar_palabras(respuesta_final)
-    if palabras_final > 500:
-        st.warning(f"⚠️ You have written {palabras_final} words. Limit is 500.")
+    if palabras_final > 700:
+        st.warning(f"⚠️ You have written {palabras_final} words. Limit is 700.")
     else:
-        st.caption(f"Words: {palabras_final} / 500")
+        st.caption(f"Words: {palabras_final} / 700")
 
     procesar_final = st.button(
         "▶️ Request the Assertive Agent's correction",
@@ -267,8 +347,8 @@ if st.session_state.fase >= 2:
         if not respuesta_final.strip():
             st.error("You must write your final answer.")
             st.stop()
-        if palabras_final > 500:
-            st.error("Your final answer exceeds 500 words. Trim it before continuing.")
+        if palabras_final > 700:
+            st.error("Your final answer exceeds 700 words. Trim it before continuing.")
             st.stop()
 
         st.session_state.respuesta_final = respuesta_final
@@ -333,4 +413,5 @@ if st.session_state.fase >= 3:
 st.divider()
 st.caption(
     "AI Case Review Method · Prof. Dr. Jordi Garrido · La Salle Campus Barcelona-URL · "
+    "Powered by Claude (Anthropic)"
 )

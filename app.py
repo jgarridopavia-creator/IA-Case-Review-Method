@@ -1,7 +1,8 @@
 """
 AI Case Review Method
 Streamlit application with four agents:
-  0. Evaluator (gatekeeper): scores the initial answer 0-10. Threshold = 6/10.
+  0. Evaluator (gatekeeper): scores the initial answer 0-3 (3 criteria, 0-1 each).
+     Threshold = 2/3.
   1. Critic
   2. Optimist
   3. Assertive
@@ -28,6 +29,7 @@ from agents import (
     ejecutar_asertivo,
     ETIQUETAS_CRITERIOS,
     CRITERIOS,
+    MENSAJE_BLOQUEO_EN,
 )
 
 load_dotenv()
@@ -215,7 +217,7 @@ if st.session_state.fase >= 1:
                 st.session_state.fase = 2
                 st.rerun()
             else:
-                st.session_state.fase = 1  # stay in phase 1
+                st.session_state.fase = 1
                 st.rerun()
         except Exception as e:
             st.error(f"Error calling the evaluator: {e}")
@@ -237,28 +239,29 @@ if st.session_state.evaluacion is not None:
     st.divider()
     if passes:
         st.success(
-            f"✅ **Evaluator score: {total}/10** — Your answer meets the minimum quality "
+            f"✅ **Evaluator score: {total}/3** — Your answer meets the minimum quality "
             f"to proceed (attempt #{st.session_state.intentos_evaluador})."
         )
     else:
+        # Fixed English message + indication of which criteria fail
+        criterios_fallats = [etiquetas.get(k, k) for k, _ in CRITERIOS if int(scores.get(k, 0)) == 0]
+        lista_fallos = ", ".join(criterios_fallats) if criterios_fallats else "—"
         st.error(
-            f"❌ **Evaluator score: {total}/10** — Your answer is not yet evaluable "
+            f"❌ **Evaluator score: {total}/3** — {MENSAJE_BLOQUEO_EN} "
             f"(attempt #{st.session_state.intentos_evaluador}). "
-            f"You need at least 6/10 to receive critical and optimistic feedback. "
-            f"Review the table below, rewrite your answer above and click "
-            f"**Evaluate my initial answer** again."
+            f"Failing criteria: **{lista_fallos}**. "
+            f"Review the table below, rewrite your initial answer above and "
+            f"click **Evaluate my initial answer** again."
         )
 
     with st.expander("📋 Detailed evaluation by criterion", expanded=not passes):
-        # Build a small markdown table
-        filas = []
-        filas.append("| Criterion | Score | Comment |")
-        filas.append("|---|---|---|")
-        for clave, _, _ in CRITERIOS:
+        filas = ["| Criterion | Score | Comment |", "|---|---|---|"]
+        for clave, _ in CRITERIOS:
             puntos = int(scores.get(clave, 0))
             etiqueta = etiquetas.get(clave, clave)
             comentari = feedback.get(clave, "—").replace("|", "/")
-            filas.append(f"| {etiqueta} | **{puntos}/2** | {comentari} |")
+            simbol = "✅" if puntos == 1 else "❌"
+            filas.append(f"| {etiqueta} | {simbol} **{puntos}/1** | {comentari} |")
         st.markdown("\n".join(filas))
 
         if mensaje_global:
@@ -268,7 +271,6 @@ if st.session_state.evaluacion is not None:
 # PHASE 2 — Debate (Critic + Optimist)
 # ===========================================================================
 if st.session_state.fase == 2 and not st.session_state.respuesta_critico:
-    # Trigger the two agents now
     idioma = st.session_state.idioma_agentes
     try:
         with st.spinner("🗡️ The Critical Agent is analyzing…"):

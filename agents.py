@@ -1,6 +1,6 @@
 """
 Four-agent logic for AI Case Review Method.
-- Evaluator (gatekeeper): scores the student's initial answer against 5 criteria.
+- Evaluator (gatekeeper): scores the student's initial answer against 3 criteria.
 - Critic / Optimist / Assertive: same as before.
 
 The output language is dynamic: it depends on the GUI selector.
@@ -68,38 +68,34 @@ def _bloque_contexto(texto_caso: str, texto_apuntes: str) -> str:
 # AGENT 0: EVALUATOR (gatekeeper)
 # ===========================================================================
 
+# 3 criteria, 0-1 each, threshold 2/3
 CRITERIOS = [
-    ("contexto",  "Context",          "Relates the answer with market, competition, regulation, economic situation or trends."),
-    ("evidencia", "Evidence",         "Uses data, facts or fragments from the case and/or the notes to justify."),
-    ("kpis",      "KPIs",             "Includes success indicators (sales, margin, satisfaction, market share, retention, efficiency, etc.)."),
-    ("realismo",  "Realism",          "The recommendation is realistic with the company's resources, time, capabilities and constraints."),
-    ("horizonte", "Time horizon",     "Differentiates short, mid and long-term impacts of the proposed decision."),
+    ("exogenas",  "Exogenous variables"),
+    ("evidencia", "Evidence"),
+    ("realismo",  "Realism"),
 ]
 
 # Localized labels for the table shown to the student
 ETIQUETAS_CRITERIOS = {
     "English": {
-        "contexto":  "Context (market, competition, regulation, trends)",
-        "evidencia": "Evidence (data, facts, fragments from case/notes)",
-        "kpis":      "KPIs (sales, margin, satisfaction, market share...)",
-        "realismo":  "Realism (resources, time, capabilities, constraints)",
-        "horizonte": "Time horizon (short/mid/long-term impacts)",
+        "exogenas":  "Exogenous variables (market, competition, suppliers, trends, PESTEL...)",
+        "evidencia": "Evidence (data, facts, fragments from the case/notes)",
+        "realismo":  "Realism (no constructs contrary to business logic or management)",
     },
     "Castellano": {
-        "contexto":  "Contexto (mercado, competencia, regulación, tendencias)",
+        "exogenas":  "Variables exógenas (mercado, competencia, proveedores, tendencias, PESTEL...)",
         "evidencia": "Evidencia (datos, hechos, fragmentos del caso/apuntes)",
-        "kpis":      "KPIs (ventas, margen, satisfacción, cuota...)",
-        "realismo":  "Realismo (recursos, tiempo, capacidades, restricciones)",
-        "horizonte": "Horizonte temporal (impactos a corto/medio/largo plazo)",
+        "realismo":  "Realismo (sin constructos contrarios a la lógica empresarial o de management)",
     },
     "Català": {
-        "contexto":  "Context (mercat, competència, regulació, tendències)",
+        "exogenas":  "Variables exògenes (mercat, competència, proveïdors, tendències, PESTEL...)",
         "evidencia": "Evidència (dades, fets, fragments del cas/apunts)",
-        "kpis":      "KPIs (vendes, marge, satisfacció, quota...)",
-        "realismo":  "Realisme (recursos, temps, capacitats, restriccions)",
-        "horizonte": "Horitzó temporal (impactes a curt/mitjà/llarg termini)",
+        "realismo":  "Realisme (sense constructes contraris a la lògica empresarial o de management)",
     },
 }
+
+# Fixed English message shown when the answer does not pass
+MENSAJE_BLOQUEO_EN = "The answer is not yet assessable. Reformulate before continuing."
 
 
 def prompt_avaluador(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma) -> str:
@@ -114,23 +110,20 @@ ROLE INSTRUCTIONS
 =================
 You are a strict but fair MBA case-method evaluator. Your ONLY mission is to decide whether the student's initial answer meets the minimum quality required to deserve full critical/optimistic feedback.
 
-Score the answer on 5 criteria. For each criterion, give an integer score:
+Score the answer on 3 criteria. For each criterion, give an integer score:
   - 0 = absent (the answer does NOT address this criterion)
-  - 1 = partial (the answer addresses it superficially or incompletely)
-  - 2 = present (the answer addresses it clearly and substantively)
+  - 1 = present (the answer addresses it clearly)
 
-The 5 criteria are:
-1. CONTEXT — Relates the answer with the case's environment: market, competition, economic situation, regulation, or trends.
-2. EVIDENCE — Uses data, facts or fragments from the case and/or the professor's notes to justify the recommendation.
-3. KPIs — Includes success indicators (sales, margin, customer satisfaction, market share, retention, efficiency, etc.).
-4. REALISM — The recommendation is realistic given the company's resources, time, capabilities and constraints described in the case.
-5. TIME HORIZON — Differentiates short-term, mid-term and long-term impacts of the proposed decision.
+The 3 criteria are:
+1. EXOGENOUS VARIABLES — The answer relates to exogenous information: market, competition, suppliers, trends, PESTEL framework, etc.
+2. EVIDENCE — The answer is based on data, facts or fragments from the case and/or the professor's notes.
+3. REALISM — The answer is realistic. It is NOT a construct contrary to all business or management logic.
 
-ANTI-CHEAT RULES
-================
-- If the answer is empty, nonsensical, or only a few words: 0 in all criteria.
-- If the answer copies the case practically verbatim without adding analysis: max 1 in EVIDENCE, 0 in the rest.
-- If the answer is a generic management essay unrelated to the specific case: 0 in CONTEXT and EVIDENCE.
+ANTI-CHEAT RULES (apply strictly)
+=================================
+- If the answer is empty, gibberish, or only a few words without meaning: 0 in ALL criteria (total = 0/3).
+- If the answer is the literal copy of fragments of the case practically verbatim without adding any analysis: 0 in ALL criteria (total = 0/3).
+- If the answer is a generic management essay completely unrelated to the specific case: 0 in EXOGENOUS VARIABLES and 0 in EVIDENCE.
 
 OUTPUT FORMAT (STRICT JSON, NOTHING ELSE)
 =========================================
@@ -138,47 +131,39 @@ Return ONLY a JSON object with this exact structure (no markdown, no code fences
 
 {{
   "scores": {{
-    "contexto":  <0|1|2>,
-    "evidencia": <0|1|2>,
-    "kpis":      <0|1|2>,
-    "realismo":  <0|1|2>,
-    "horizonte": <0|1|2>
+    "exogenas":  <0|1>,
+    "evidencia": <0|1>,
+    "realismo":  <0|1>
   }},
-  "total": <integer 0-10>,
+  "total": <integer 0-3>,
   "passes": <true|false>,
   "feedback_per_criterion": {{
-    "contexto":  "<one short sentence explaining why this score>",
+    "exogenas":  "<one short sentence explaining why this score>",
     "evidencia": "<one short sentence explaining why this score>",
-    "kpis":      "<one short sentence explaining why this score>",
-    "realismo":  "<one short sentence explaining why this score>",
-    "horizonte": "<one short sentence explaining why this score>"
+    "realismo":  "<one short sentence explaining why this score>"
   }},
-  "global_message": "<2-3 sentences: if passes=false, tell the student what to add/improve to reach >=6/10. If passes=true, briefly highlight the strongest criterion>"
+  "global_message": "<2-3 sentences. If passes=false: tell the student concretely what to add/improve to reach >=2/3. If passes=true: briefly highlight the strongest criterion>"
 }}
 
-The "passes" field MUST be true if total >= 6, false otherwise.
-The "total" MUST equal the sum of the 5 scores.
-
-The strings inside "feedback_per_criterion" and "global_message" MUST be written in this language: {idioma}.
-The JSON keys (contexto, evidencia, etc.) and structure MUST stay as-is in English.
+Rules:
+- "passes" MUST be true if total >= 2, false otherwise.
+- "total" MUST equal the sum of the 3 scores.
+- The strings inside "feedback_per_criterion" and "global_message" MUST be written in this language: {idioma}.
+- The JSON keys (exogenas, evidencia, realismo, etc.) and structure MUST stay as-is in English.
 """
 
 
 def _extraer_json(texto: str) -> dict:
-    """Extracts the first JSON object found in the model's response.
-    Tolerates accidental code fences or extra text."""
-    # Try direct parse first
+    """Extracts the first JSON object found in the model's response."""
     try:
         return json.loads(texto)
     except Exception:
         pass
-    # Strip code fences if present
     limpio = re.sub(r"```(?:json)?", "", texto).strip("` \n")
     try:
         return json.loads(limpio)
     except Exception:
         pass
-    # Last resort: extract the first {...} block
     match = re.search(r"\{.*\}", texto, re.DOTALL)
     if match:
         return json.loads(match.group(0))
@@ -186,24 +171,23 @@ def _extraer_json(texto: str) -> dict:
 
 
 def ejecutar_avaluador(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma="English") -> dict:
-    """Returns a dict with the evaluation result.
-    Keys: scores, total, passes, feedback_per_criterion, global_message."""
+    """Returns dict with: scores, total, passes, feedback_per_criterion, global_message."""
     client = _get_client()
     prompt = prompt_avaluador(texto_caso, texto_apuntes, pregunta, respuesta_ini, idioma)
     msg = client.messages.create(
         model=MODELO,
-        max_tokens=1500,
+        max_tokens=1200,
         messages=[{"role": "user", "content": prompt}],
     )
     partes = [b.text for b in msg.content if getattr(b, "type", None) == "text"]
     texto = "\n".join(partes).strip()
     data = _extraer_json(texto)
 
-    # Defensive normalization
+    # Defensive normalization (force consistency between scores and total)
     scores = data.get("scores", {})
-    total = sum(int(scores.get(k, 0)) for k, _, _ in CRITERIOS)
+    total = sum(int(scores.get(k, 0)) for k, _ in CRITERIOS)
     data["total"] = total
-    data["passes"] = total >= 6
+    data["passes"] = total >= 2
     return data
 
 
